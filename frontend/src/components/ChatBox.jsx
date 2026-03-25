@@ -11,7 +11,7 @@ const ChatBox = ({ setHighlightQuery }) => {
     setMessages((prev) => [...prev, userMsg]);
 
     try {
-      const res = await fetch("http://127.0.0.1:8000/query", {
+      const res = await fetch(`${import.meta.env.VITE_API_URL}/query`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",

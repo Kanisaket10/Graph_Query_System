@@ -27,7 +27,7 @@ const GraphView = ({ highlightQuery }) => {
   // FETCH GRAPH
   // -----------------------------
   useEffect(() => {
-    fetch("http://127.0.0.1:8000/graph")
+    fetch(`${import.meta.env.VITE_API_URL}/graph`)
       .then((res) => res.json())
       .then((data) => {
         const simNodes = data.nodes.map((n) => ({
