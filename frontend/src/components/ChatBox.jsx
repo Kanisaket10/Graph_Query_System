@@ -21,9 +21,10 @@ const ChatBox = ({ setHighlightQuery }) => {
 
       // ✅ FIX: define data BEFORE using it
       const data = await res.json();
+      console.log("Backend Response:", data);
 
       // ✅ show bot response
-      const botMsg = { role: "bot", text: data.answer };
+      const botMsg = { role: "bot", text: data.answer || "No response received"};
       setMessages((prev) => [...prev, botMsg]);
 
       // ✅ update graph highlight AFTER response

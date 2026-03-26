@@ -25,7 +25,8 @@ load_dotenv()
 # -------------------------------
 # LLM CLIENT
 # -------------------------------
-client = Groq(api_key=os.getenv("GROQ_API_KEY"))
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+client = Groq(api_key=GROQ_API_KEY) if GROQ_API_KEY else None
 
 # -------------------------------
 # APP INIT
@@ -87,6 +88,9 @@ Return ONLY label.
 # 🔥 LLM RESPONSE
 # -------------------------------
 def ask_llm(user_query, context):
+    if not GROQ_API_KEY or client is None:
+        return "LLM is not configured. Set GROQ_API_KEY on the backend environment."
+
     try:
         response = client.chat.completions.create(
             model="llama-3.1-8b-instant",
@@ -112,8 +116,9 @@ STRICT:
 
         return response.choices[0].message.content
 
-    except:
-        return "Error generating response"
+    except Exception as exc:
+        print(f"LLM call failed: {exc}")
+        return "LLM request failed. Check GROQ_API_KEY validity/credits and backend logs."
 
 
 # -------------------------------
