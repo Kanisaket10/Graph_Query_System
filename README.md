@@ -1,47 +1,92 @@
-<!-- # React + Vite
-
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
-
-Currently, two official plugins are available:
-
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
-
-## React Compiler
-
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
-
-## Expanding the ESLint configuration
-
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project. -->
-
-
-
 # Graph-Based Data Modeling and Query System
 
 ## Overview
-This project converts fragmented business data (orders, deliveries, billing, payments) into a connected graph and allows users to explore it using natural language queries.
+This project models SAP Order-to-Cash (O2C) lifecycle data as a graph and answers domain questions through a chat interface.  
+It combines deterministic data logic (for accuracy) with LLM-generated business explanations (for readability).
 
 ---
 
-## Architecture
+## Architecture Decisions
 
-### Backend
-- FastAPI
-- Pandas for data processing
-- NetworkX for graph construction
-- Groq LLM (LLaMA 3.1)
+### 1) Two-tier architecture
+- **Frontend**: React + Vite + React Flow
+- **Backend**: FastAPI + Pandas + Graph generation endpoint
+- **Reason**: Separates UI concerns from query/data logic, makes deployment and debugging easier.
 
-### Frontend
-- React + Vite
-- React Flow for graph visualization
+### 2) Deterministic logic first, LLM second
+- Backend computes key answers (trace, broken flows, top deliveries, top products) using dataframe operations.
+- LLM is used to convert computed context into short business explanations.
+- **Reason**: Reduces hallucination risk and improves consistency for evaluation queries.
+
+### 3) Graph-based visualization for process understanding
+- Entities are represented as nodes and lifecycle links as edges.
+- **Reason**: O2C data is inherently relationship-driven (Order -> Delivery -> Billing -> Payment).
+
+---
+
+## Database Choice
+
+### Chosen approach
+- **No external DB** is used in this version.
+- Data is loaded from provided `.jsonl` files into **Pandas DataFrames** at backend startup.
+
+### Why this choice
+- Dataset is bounded and read-heavy for analytical queries.
+- Fast iteration for assignment scope (no schema migration/DB setup overhead).
+- Simple local + cloud deployment.
+
+### Tradeoff
+- Not ideal for very large datasets or high concurrency; production scale could migrate to PostgreSQL/graph DB.
+
+---
+
+## LLM Prompting Strategy
+
+### Model
+- Groq API with `llama-3.1-8b-instant`.
+
+### Prompt strategy
+- System prompt enforces:
+  - use only provided dataset context
+  - no hallucination
+  - business-domain language only
+  - no implementation leakage (Python/pandas/API/model details)
+  - avoid uncertain phrasing like "I assume"
+- Missing-data behavior is explicit and controlled.
+
+### Query handling flow
+1. Rule-based intent detection (`trace`, `broken`, `product`, `top_delivery`).
+2. Deterministic data aggregation/tracing in backend.
+3. LLM explanation over computed context (where needed).
+
+---
+
+## Guardrails
+
+The system includes explicit safeguards:
+
+1. **Domain restriction**
+- Queries are routed to O2C-specific intents and fallback prompts users to ask in supported domain.
+
+2. **Dataset grounding**
+- Answers are generated from computed context derived from dataset tables.
+
+3. **No internal-tech disclosure**
+- Prompt instructs model not to reveal backend implementation details.
+
+4. **Missing/invalid input handling**
+- Trace queries without IDs return guided prompts (example IDs).
+- Invalid document IDs return clear "no matching flow" messages.
+
+5. **Fallback behavior**
+- Unsupported questions return a controlled domain hint, not fabricated output.
 
 ---
 
 ## Graph Model
 
 ### Nodes
-- Orders
+- Sales Orders
 - Deliveries
 - Billing Documents
 - Payments
@@ -49,86 +94,77 @@ This project converts fragmented business data (orders, deliveries, billing, pay
 - Customers
 
 ### Edges
-- Order → Delivery
-- Delivery → Billing
-- Billing → Payment
+- Sales Order -> Delivery
+- Delivery -> Billing
+- Billing -> Payment
 
 ---
 
-## LLM Integration
+## Supported Example Queries
 
-We use Groq API with LLaMA 3.1 model.
-
-### Strategy:
-- Rule-based data extraction (ensures accuracy)
-- LLM used for:
-  - Natural language understanding
-  - Explanation generation
-
-### Prompt Design:
-- No hallucination
-- Dataset-grounded answers only
-- Business-focused explanation
+- `which products are associated with the highest number of billing documents`
+- `top 5 orders by deliveries`
+- `which orders are not billed`
+- `trace order 740506`
+- `trace billing document 90012345`
 
 ---
 
-## Features
+## Setup and Run
 
-### Graph
-- Interactive graph (zoom, pan, minimap)
-- Force-directed layout
-- Node highlighting
+## 1) Backend (FastAPI)
 
-### Chat
-- Natural language queries
-- LLM-based explanations
-- Graph highlighting using related_ids
+From project root:
 
-### Guardrails
-- Restricts queries to dataset domain
+```bash
+cd backend
+pip install fastapi uvicorn pandas python-dotenv groq
+uvicorn main:app --reload
+```
+
+Backend runs on:
+- `http://127.0.0.1:8000`
+- Swagger docs: `http://127.0.0.1:8000/docs`
+
+Required backend env var:
+- `GROQ_API_KEY=<your_key>`
+
+## 2) Frontend (React + Vite)
+
+From project root:
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+Frontend runs on:
+- `http://localhost:5173`
+
+Frontend env var:
+- `VITE_API_URL=<backend_base_url>`
 
 ---
 
-## Example Queries
+## Deployment Notes (Render)
 
-- Which products have highest billing?
-- Trace order 740508
-- Why are some orders not billed?
-- Show broken flows
-
----
-
-## Key Design Decisions
-
-### Why Graph?
-To visualize relationships between entities clearly.
-
-### Why NetworkX?
-Simple, flexible graph modeling.
-
-### Why Groq?
-Fast inference + free tier access.
+- Backend: Render Web Service (FastAPI)
+- Frontend: Render Static Site (root `frontend`, publish `dist`)
+- Ensure frontend env points to backend URL:
+  - `VITE_API_URL=https://<your-backend>.onrender.com`
 
 ---
 
 ## Limitations
 
-- Payment data may be missing for some billing documents
-- Uses partial dataset context for LLM
+- Some records may not complete full O2C lifecycle in dataset (expected gaps).
+- Rule-based intents cover assignment scope; broader NL coverage can be improved.
 
 ---
 
 ## Future Improvements
 
-- Graph clustering
-- Advanced filtering
-- Streaming LLM responses
-
----
-
-## Setup
-
-### Backend
-```bash
-pip install fastapi uvicorn pandas networkx groq
-uvicorn main:app --reload
+- Add stronger intent parser for complex multi-condition queries.
+- Add caching/indexing for faster large-data queries.
+- Add authentication and query logging for production usage.
