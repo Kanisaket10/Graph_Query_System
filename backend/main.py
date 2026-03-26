@@ -118,6 +118,10 @@ STRICT:
 - NO hallucination
 - Explain clearly WHY
 - Keep answer short (3–4 lines)
+- Use only business/domain language (order, delivery, billing, payment, customer, product)
+- Do NOT mention implementation details (Python, pandas, DataFrame, API, model, prompt, backend)
+- Do NOT say "I assume"
+- If data is missing, say: "Insufficient data in provided dataset."
 """
                 },
                 {
