@@ -177,14 +177,66 @@ def query_data(req: QueryRequest):
     # TRACE
     # -------------------------------
     if intent == "trace":
+        id_match = re.findall(r"\d+", user_query)
+        if not id_match:
+            return {
+                "answer": "Please provide a valid document ID. Example: trace order 740506 or trace billing document 90012345.",
+                "related_ids": []
+            }
 
-        order_match = re.findall(r'\d+', user_query)
+        trace_id = id_match[0]
+        is_billing_trace = ("billing" in user_query) or ("invoice" in user_query)
 
-        if order_match:
-            sample_order = order_match[0]
-        else:
-            sample_order = sales_orders.iloc[0]["salesOrder"]
+        # Trace by billing document: Billing -> Delivery -> Sales Order -> Payment
+        if is_billing_trace:
+            billing_doc_col = get_first_existing_col(
+                billing_items, ["billingDocument", "billingDoc", "invoiceDocument", "invoiceReference"]
+            )
+            billing_ref_col = get_first_existing_col(
+                billing_items, ["referenceSdDocument", "deliveryDocument", "referenceDocument"]
+            )
+            delivery_doc_col = get_first_existing_col(
+                delivery_items, ["deliveryDocument"]
+            )
+            delivery_ref_col = get_first_existing_col(
+                delivery_items, ["referenceSdDocument", "salesOrder", "referenceDocument"]
+            )
 
+            if not billing_doc_col or not billing_ref_col or not delivery_doc_col or not delivery_ref_col:
+                return {
+                    "answer": "Trace is unavailable: required billing/delivery columns are missing.",
+                    "related_ids": []
+                }
+
+            deliveries = billing_items[
+                billing_items[billing_doc_col].astype(str) == trace_id
+            ][billing_ref_col].astype(str).unique()
+
+            orders = delivery_items[
+                delivery_items[delivery_doc_col].astype(str).isin(deliveries)
+            ][delivery_ref_col].astype(str).unique()
+
+            billings = [trace_id]
+            payments_list = payments[
+                payments["invoiceReference"].astype(str).isin(billings)
+            ]["accountingDocument"].astype(str).unique()
+
+            related_ids = list(orders) + list(deliveries) + list(billings) + list(payments_list)
+
+            if not related_ids:
+                return {
+                    "answer": f"No matching flow found for billing document {trace_id}. Please verify the ID.",
+                    "related_ids": []
+                }
+
+            answer = ask_llm(
+                user_query,
+                f"Sales Orders: {orders}, Deliveries: {deliveries}, Billing: {billings}, Payments: {payments_list}"
+            )
+            return {"answer": answer, "related_ids": related_ids}
+
+        # Trace by sales order: Sales Order -> Delivery -> Billing -> Payment
+        sample_order = trace_id
         deliveries = delivery_items[
             delivery_items["referenceSdDocument"] == sample_order
         ]["deliveryDocument"].astype(str).unique()
@@ -203,6 +255,12 @@ def query_data(req: QueryRequest):
             + list(billings)
             + list(payments_list)
         )
+
+        if len(deliveries) == 0 and len(billings) == 0 and len(payments_list) == 0:
+            return {
+                "answer": f"No matching flow found for order {sample_order}. Please verify the ID.",
+                "related_ids": [sample_order]
+            }
 
         answer = ask_llm(
             user_query,
