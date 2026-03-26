@@ -17,7 +17,8 @@ from load_data import (
     sales_items,
     delivery_items,
     billing_items,
-    payments
+    payments,
+    products
 )
 
 load_dotenv()
@@ -63,11 +64,17 @@ def detect_intent(user_query):
     if "product" in user_query:
         return "product"
 
+    if (
+        ("highest" in user_query or "top" in user_query or "most" in user_query)
+        and ("delivery" in user_query or "deliveries" in user_query)
+    ):
+        return "top_delivery"
+
     # 🤖 fallback to LLM
     try:
         prompt = f"""
 Classify query into:
-trace / broken / product / general
+trace / broken / product / top_delivery / general
 
 Query: {user_query}
 Return ONLY label.
@@ -82,6 +89,12 @@ Return ONLY label.
 
     except:
         return "general"
+
+def get_first_existing_col(df, candidates):
+    for col in candidates:
+        if col in df.columns:
+            return col
+    return None
 
 
 # -------------------------------
@@ -228,8 +241,89 @@ def query_data(req: QueryRequest):
         }
 
     # -------------------------------
+    # TOP PRODUCTS BY BILLING DOC COUNT
+    # -------------------------------
+    elif intent == "product":
+        top_n_match = re.search(r"\btop\s+(\d+)\b", user_query)
+        top_n = int(top_n_match.group(1)) if top_n_match else 10
+
+        product_col = get_first_existing_col(
+            billing_items,
+            ["material", "product", "productId", "materialNumber", "sku"]
+        )
+        billing_doc_col = get_first_existing_col(
+            billing_items,
+            ["billingDocument", "billingDoc", "invoiceDocument", "invoiceReference"]
+        )
+
+        if not product_col or not billing_doc_col:
+            return {
+                "answer": "Product billing analysis is unavailable: required product or billing columns are missing.",
+                "related_ids": []
+            }
+
+        product_counts = (
+            billing_items[[product_col, billing_doc_col]]
+            .dropna()
+            .groupby(product_col)[billing_doc_col]
+            .nunique()
+            .sort_values(ascending=False)
+            .head(top_n)
+        )
+
+        if product_counts.empty:
+            return {
+                "answer": "No product-billing links found in data.",
+                "related_ids": []
+            }
+
+        top_products = product_counts.index.astype(str).tolist()
+        list_lines = [
+            f"{idx}. {product} - {int(count)} billing docs"
+            for idx, (product, count) in enumerate(product_counts.items(), start=1)
+        ]
+        counts_text = "\n".join(list_lines)
+
+        return {
+            "answer": f"Top {len(top_products)} products by billing document count:\n{counts_text}",
+            "related_ids": top_products
+        }
+
+    # -------------------------------
+    # TOP ORDERS BY DELIVERY COUNT
+    # -------------------------------
+    elif intent == "top_delivery":
+        top_n_match = re.search(r"\btop\s+(\d+)\b", user_query)
+        top_n = int(top_n_match.group(1)) if top_n_match else 10
+
+        delivery_counts = (
+            delivery_items.groupby("referenceSdDocument")["deliveryDocument"]
+            .nunique()
+            .sort_values(ascending=False)
+            .head(top_n)
+        )
+
+        if delivery_counts.empty:
+            return {
+                "answer": "No delivery-linked orders found in data.",
+                "related_ids": []
+            }
+
+        top_orders = delivery_counts.index.astype(str).tolist()
+        list_lines = [
+            f"{idx}. {order} - {int(count)} deliveries"
+            for idx, (order, count) in enumerate(delivery_counts.items(), start=1)
+        ]
+        counts_text = "\n".join(list_lines)
+
+        return {
+            "answer": f"Top {len(top_orders)} orders by delivery count:\n{counts_text}",
+            "related_ids": top_orders
+        }
+
+    # -------------------------------
     # FALLBACK
     # -------------------------------
     return {
-        "answer": "Ask about orders, delivery, billing or trace."
+        "answer": "Ask about orders, delivery, billing, trace, or top deliveries."
     }

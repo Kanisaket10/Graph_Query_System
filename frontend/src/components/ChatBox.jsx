@@ -112,6 +112,7 @@ const ChatBox = ({ setHighlightQuery }) => {
                 maxWidth: "75%",
                 fontSize: "14px",
                 lineHeight: "1.4",
+                whiteSpace: "pre-wrap",
               }}
             >
               {msg.text}
